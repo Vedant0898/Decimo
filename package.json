@@ -39,9 +39,9 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.check.json",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -51,11 +51,14 @@
     "node": ">=18"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/node": "^22.0.0",
     "eslint": "^9.0.0",
+    "expect-type": "^1.4.0",
     "prettier": "^3.0.0",
     "tsup": "^8.0.0",
     "typescript": "^5.0.0",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^2.0.0"
   }
 }
