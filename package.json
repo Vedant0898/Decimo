@@ -1,0 +1,66 @@
+{
+  "name": "decimo",
+  "version": "0.1.0",
+  "description": "Type-safe probabilistic decision layer for AI applications.",
+  "keywords": [
+    "ai",
+    "artificial-intelligence",
+    "probabilistic",
+    "decision",
+    "classification",
+    "inference",
+    "llm",
+    "typescript"
+  ],
+  "homepage": "https://github.com/Vedant0898/Decimo#readme",
+  "bugs": {
+    "url": "https://github.com/Vedant0898/Decimo/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vedant0898/Decimo.git"
+  },
+  "license": "MIT",
+  "author": "Vedant Tamhane",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.0.0",
+    "expect-type": "^1.4.0",
+    "prettier": "^3.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^2.0.0"
+  }
+}
