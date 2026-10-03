@@ -1,7 +1,7 @@
 # Decimo
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
-![node >=18](https://img.shields.io/badge/node-%3E%3D18-5FA04E)
+![node >=22](https://img.shields.io/badge/node-%3E%3D22-5FA04E)
 
 **Probabilistic decision middleware for TypeScript.**
 
@@ -52,7 +52,7 @@ decision model. The decision, the state, and the result types are identical.
 npm install decimo     # not published yet — see Quick start for running from source
 ```
 
-> **Status:** `v0.1.0`, not yet published to npm and without CI. See
+> **Status:** `v0.1.0`, not yet published to npm. See
 > [Project Status](#13-project-status).
 
 ---
@@ -760,6 +760,11 @@ npm run build      # tsup → dist (ESM, CJS, .d.ts)
 npm run dev        # tsup --watch
 ```
 
+Every push and pull request runs these automatically via GitHub Actions
+(`.github/workflows/ci.yml`): `typecheck`, `lint` and `format:check` once, `test` on a Node 22 and
+24 matrix, and `build` once. Run them locally before pushing so you catch failures in one second
+rather than one CI round-trip.
+
 Type inference is treated as a product feature, so it is tested explicitly in
 [`test/types.test.ts`](test/types.test.ts) with `@ts-expect-error` and exact-identity assertions
 checked by `tsc`. `npm run typecheck` fails if a value union is ever widened or if an invalid value
@@ -792,7 +797,9 @@ Concretely, today:
 
 - **Not published to npm.** `npm install decimo` will not resolve; use the source for now.
 - **`v0.1.0`.** No stability guarantee.
-- **No CI.** The quality gates above run locally.
+- **CI is green on `main`, but pre-1.0.** Every push and pull request runs typecheck, tests on
+  Node 22 and 24, build, lint and format checks automatically. Treat the gates as a floor, not a
+  ceiling — see [Testing and development](#12-testing-and-development).
 - **One external provider.** `JevProvider`. Everything else is `MockProvider` or a provider you
   write. `JevProvider` also depends on a third-party API, so it is only exercised against a stub
   `fetch` in this repo's own tests.
@@ -837,7 +844,8 @@ There is no `CONTRIBUTING.md` yet; this section is the short version.
 
 - **Report bugs and propose features** via
   [GitHub issues](https://github.com/Vedant0898/Decimo/issues).
-- **Before opening a pull request**, make sure these pass:
+- **Before opening a pull request**, make sure these pass. CI runs the same gates, but catching a
+  failure locally is faster:
 
   ```sh
   npm run typecheck
