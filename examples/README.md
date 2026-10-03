@@ -50,7 +50,7 @@ result.intent.probability("unknown"); // ✗ compile error
 
 `categorical` takes a `Record` because its values are unordered; `ordinal` takes an ordered
 array because the order _is_ the scale. See the ordering contract in the
-[README](../README.md#ordering-contract).
+[API reference](../docs/api.md#ordering-contract).
 
 Step 1 and step 3 never change when you swap providers. That is the whole
 point: the decision is Decimo's, the inference is the provider's, and the

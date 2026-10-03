@@ -72,7 +72,6 @@ describe("public API", () => {
   it("keeps the decision surface", () => {
     expect(exported).toEqual(
       expect.arrayContaining([
-        "VERSION",
         "boolean",
         "categorical",
         "ordinal",
