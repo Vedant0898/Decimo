@@ -1,18 +1,24 @@
 import {
   ConfigurationError,
-  InvalidProviderResponseError,
   isDecimoError,
   ProviderError,
   ProviderTimeoutError,
 } from "./errors";
-import type { DecisionResult, DecisionSpec } from "./decision";
-import { normalizeDecision } from "./decision";
-import { createBooleanResult, createDistributionResult } from "./result";
+import {
+  prepareDecision,
+  type DecisionResult,
+  type DecisionSpec,
+} from "./decision";
+import { validateProviderResponse } from "./response";
+import {
+  createBooleanResult,
+  createDistributionResult,
+  type ValidatedResult,
+} from "./result";
 import { assertJsonValue, type JsonValue } from "../types/json";
+import type { CanonicalDecision, AnswerPair } from "../schema/canonical";
 import type {
   DecisionProvider,
-  NormalizedQuestion,
-  ProviderAnswer,
   ProviderRequest,
   ProviderResponse,
 } from "../providers/provider";
@@ -46,19 +52,23 @@ export class DecisionEngine {
     this.providerName = resolveProviderName(provider, options.providerName);
   }
 
+  /**
+   * Validate and canonicalize the decision, hand it to the provider, then
+   * validate what comes back. The decision is inspected exactly once, here.
+   */
   async evaluate<D extends DecisionSpec>(
     decision: D,
     state: JsonValue,
   ): Promise<DecisionResult<D>> {
-    const questions = normalizeDecision(decision);
+    const canonical = prepareDecision(decision);
     assertJsonValue(state);
 
-    const request: ProviderRequest = { state, questions };
+    const request: ProviderRequest = { state, questions: canonical };
     const response = await this.callProvider(request);
 
     return buildResults(
-      questions,
       response,
+      canonical,
       this.providerName,
     ) as DecisionResult<D>;
   }
@@ -68,6 +78,7 @@ export class DecisionEngine {
   ): Promise<ProviderResponse> {
     const controller = new AbortController();
     const timeoutMs = this.timeoutMs;
+
     const call = Promise.resolve()
       .then(() =>
         this.provider.evaluate(request, {
@@ -80,7 +91,7 @@ export class DecisionEngine {
       });
 
     if (timeoutMs === undefined) {
-      return unwrap(await call, this.providerName);
+      return call;
     }
 
     let handle: ReturnType<typeof setTimeout> | undefined;
@@ -100,10 +111,42 @@ export class DecisionEngine {
     });
 
     try {
-      return unwrap(await Promise.race([call, timeout]), this.providerName);
+      return await Promise.race([call, timeout]);
     } finally {
       clearTimeout(handle);
     }
+  }
+}
+
+function buildResults(
+  response: unknown,
+  decision: CanonicalDecision,
+  providerName: string,
+): Record<string, ValidatedResult> {
+  const results: Record<string, ValidatedResult> = {};
+
+  for (const pair of validateProviderResponse(
+    response,
+    decision,
+    providerName,
+  )) {
+    results[pair.id] = resultOf(pair);
+  }
+
+  return results;
+}
+
+/**
+ * `pair.kind` discriminates the union, so narrowing it narrows the question and
+ * its matching answer together.
+ */
+function resultOf(pair: AnswerPair): ValidatedResult {
+  switch (pair.kind) {
+    case "boolean":
+      return createBooleanResult(pair.answer);
+    case "categorical":
+    case "ordinal":
+      return createDistributionResult(pair.question.levels, pair.answer);
   }
 }
 
@@ -117,140 +160,6 @@ function wrapProviderError(error: unknown, providerName: string): unknown {
   return new ProviderError(`Provider "${providerName}" failed: ${reason}`, {
     provider: providerName,
     cause: error,
-  });
-}
-
-function unwrap(
-  response: ProviderResponse,
-  providerName: string,
-): ProviderResponse {
-  if (typeof response !== "object" || response === null) {
-    throw new InvalidProviderResponseError(
-      `Provider "${providerName}" did not return a response object.`,
-      { details: { provider: providerName, received: response } },
-    );
-  }
-
-  return response;
-}
-
-function buildResults(
-  questions: Record<string, NormalizedQuestion>,
-  response: ProviderResponse,
-  providerName: string,
-): Record<string, unknown> {
-  const answers = response.answers;
-
-  if (
-    typeof answers !== "object" ||
-    answers === null ||
-    Array.isArray(answers)
-  ) {
-    throw new InvalidProviderResponseError(
-      `Provider "${providerName}" did not return an answers map.`,
-      { details: { provider: providerName, received: response } },
-    );
-  }
-
-  const ids = new Set(Object.keys(questions));
-  const results: Record<string, unknown> = {};
-
-  for (const [id, question] of Object.entries(questions)) {
-    const answer = (answers as Record<string, ProviderAnswer>)[id];
-
-    if (answer === undefined) {
-      throw new InvalidProviderResponseError(
-        `Provider "${providerName}" did not answer question "${id}".`,
-        {
-          details: {
-            provider: providerName,
-            questionId: id,
-            received: answers,
-          },
-        },
-      );
-    }
-
-    results[id] = buildResult(question, answer, providerName);
-  }
-
-  for (const id of Object.keys(answers)) {
-    if (!ids.has(id)) {
-      throw new InvalidProviderResponseError(
-        `Provider "${providerName}" answered the unrequested question "${id}".`,
-        {
-          details: {
-            provider: providerName,
-            questionId: id,
-            received: answers,
-          },
-        },
-      );
-    }
-  }
-
-  return results;
-}
-
-function buildResult(
-  question: NormalizedQuestion,
-  answer: ProviderAnswer,
-  providerName: string,
-): unknown {
-  const id = question.id;
-
-  if (typeof answer !== "object" || answer === null) {
-    throw new InvalidProviderResponseError(
-      `Question "${id}" was answered with a non-object answer.`,
-      { details: { provider: providerName, questionId: id, received: answer } },
-    );
-  }
-
-  if (answer.type !== question.type) {
-    throw new InvalidProviderResponseError(
-      `Question "${id}" is a ${question.type} question but was answered as ${String(
-        answer.type,
-      )}.`,
-      { details: { provider: providerName, questionId: id, received: answer } },
-    );
-  }
-
-  if (question.type === "boolean") {
-    const booleanAnswer = answer as Extract<
-      ProviderAnswer,
-      { type: "boolean" }
-    >;
-    return createBooleanResult({
-      questionId: id,
-      probability: booleanAnswer.probability,
-      confidence: booleanAnswer.confidence,
-      provider: providerName,
-    });
-  }
-
-  const values = Object.keys(question.values) as string[];
-
-  if (question.type === "categorical") {
-    const categoricalAnswer = answer as Extract<
-      ProviderAnswer,
-      { type: "categorical" }
-    >;
-    return createDistributionResult({
-      questionId: id,
-      values,
-      probabilities: categoricalAnswer.probabilities,
-      confidence: categoricalAnswer.confidence,
-      provider: providerName,
-    });
-  }
-
-  const ordinalAnswer = answer as Extract<ProviderAnswer, { type: "ordinal" }>;
-  return createDistributionResult({
-    questionId: id,
-    values,
-    probabilities: ordinalAnswer.probabilities,
-    confidence: ordinalAnswer.confidence,
-    provider: providerName,
   });
 }
 
@@ -283,7 +192,7 @@ function resolveProviderName(
     return override;
   }
 
-  const candidate = (provider as { readonly name?: unknown }).name;
+  const candidate: unknown = Reflect.get(provider, "name");
 
   return typeof candidate === "string" && candidate !== ""
     ? candidate

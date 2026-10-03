@@ -18,17 +18,20 @@ const questions = {
     id: "intent",
     type: "categorical",
     description: "Which department?",
-    values: {
-      billing: "Payments",
-      technical: "Technical issues",
-      sales: "Sales",
-    },
+    levels: [
+      { key: "billing", description: "Payments" },
+      { key: "technical", description: "Technical issues" },
+      { key: "sales", description: "Sales" },
+    ],
   },
   urgency: {
     id: "urgency",
     type: "ordinal",
     description: "How urgent?",
-    values: { low: "Low", high: "High" },
+    levels: [
+      { key: "low", description: "Low" },
+      { key: "high", description: "High" },
+    ],
   },
 } as const;
 
@@ -130,7 +133,10 @@ describe("MockProvider", () => {
       }),
       urgency: ordinal({
         description: "How urgent?",
-        values: { low: "Low", high: "High" },
+        values: [
+          { key: "low", description: "Low" },
+          { key: "high", description: "High" },
+        ],
       }),
     });
 

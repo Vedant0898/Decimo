@@ -52,7 +52,7 @@ export class JevProvider implements DecisionProvider {
       context ?? {},
     );
 
-    return { ...mapJevAnswers(mapped, response.answers), raw: response };
+    return { answers: mapJevAnswers(mapped, response.answers), raw: response };
   }
 }
 

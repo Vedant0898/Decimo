@@ -1,5 +1,5 @@
 import type { CategoricalQuestion, CategoryValues } from "./types";
-import { requireDescription, requireValues } from "./types";
+import { requireCategoryValues, requireDescription } from "./types";
 
 export interface CategoricalConfig<T extends CategoryValues> {
   readonly description: string;
@@ -12,6 +12,6 @@ export function categorical<T extends CategoryValues>(
   return {
     type: "categorical",
     description: requireDescription(config.description, "categorical"),
-    values: requireValues(config.values, "categorical", 1) as T,
+    values: requireCategoryValues(config.values, "categorical", 1) as T,
   };
 }

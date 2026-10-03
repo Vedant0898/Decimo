@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   InvalidProviderResponseError,
-  type NormalizedQuestion,
+  type CanonicalQuestion,
 } from "../src/index";
 import { mapJevAnswers, mapQuestionsToJev } from "../src/providers/jev/mapper";
 
-const questions: Record<string, NormalizedQuestion> = {
+const questions: Record<string, CanonicalQuestion> = {
   needsHuman: {
     id: "needsHuman",
     type: "boolean",
@@ -16,37 +16,37 @@ const questions: Record<string, NormalizedQuestion> = {
     id: "intent",
     type: "categorical",
     description: "Which department does this query belong to?",
-    values: {
-      billing: "Payments and invoices",
-      technical: "Technical problems",
-      sales: "Pricing and purchasing",
-    },
+    levels: [
+      { key: "billing", description: "Payments and invoices" },
+      { key: "technical", description: "Technical problems" },
+      { key: "sales", description: "Pricing and purchasing" },
+    ],
   },
   urgency: {
     id: "urgency",
     type: "ordinal",
     description: "How urgent is this request?",
-    values: {
-      low: "Can be handled normally",
-      medium: "Should be addressed soon",
-      high: "Requires prompt attention",
-    },
+    levels: [
+      { key: "low", description: "Can be handled normally" },
+      { key: "medium", description: "Should be addressed soon" },
+      { key: "high", description: "Requires prompt attention" },
+    ],
   },
 };
 
+const mapOne = (id: keyof typeof questions) =>
+  mapQuestionsToJev({ [id]: questions[id]! });
+
 describe("mapQuestionsToJev()", () => {
   it("maps a boolean question to a noul", () => {
-    const mapped = mapQuestionsToJev({ needsHuman: questions.needsHuman! });
-
-    expect(mapped.questions.needsHuman).toEqual({
+    expect(mapOne("needsHuman").questions.needsHuman).toEqual({
       type: "noul",
       instructions: "Does this require human intervention?",
     });
   });
 
-  it("maps a categorical question to a choice and copies the criteria", () => {
-    const source = questions.intent!;
-    const mapped = mapQuestionsToJev({ intent: source });
+  it("maps a categorical question to a choice with its level keys", () => {
+    const mapped = mapOne("intent");
 
     expect(mapped.questions.intent).toEqual({
       type: "choice",
@@ -61,7 +61,7 @@ describe("mapQuestionsToJev()", () => {
   });
 
   it("maps an ordinal question to an ordered score and records the level keys", () => {
-    const mapped = mapQuestionsToJev({ urgency: questions.urgency! });
+    const mapped = mapOne("urgency");
 
     expect(mapped.questions.urgency).toEqual({
       type: "score",
@@ -74,15 +74,33 @@ describe("mapQuestionsToJev()", () => {
     });
     expect(mapped.levels.urgency).toEqual(["low", "medium", "high"]);
   });
+
+  it("sends a descending numeric-keyed scale in its declared order", () => {
+    const mapped = mapQuestionsToJev({
+      rating: {
+        id: "rating",
+        type: "ordinal",
+        description: "How good?",
+        levels: [
+          { key: "5", description: "Terrible" },
+          { key: "3", description: "Okay" },
+          { key: "1", description: "Great" },
+        ],
+      },
+    });
+
+    // The rubric must not be reversed by JavaScript's key ordering rules.
+    expect(mapped.questions.rating).toMatchObject({
+      type: "score",
+      criteria: ["Terrible", "Okay", "Great"],
+    });
+    expect(mapped.levels.rating).toEqual(["5", "3", "1"]);
+  });
 });
 
 describe("mapJevAnswers()", () => {
-  const mapAll = () => mapQuestionsToJev(questions);
-  const mapOne = (id: "intent" | "needsHuman" | "urgency") =>
-    mapQuestionsToJev({ [id]: questions[id]! });
-
   it("maps a noul answer to a boolean answer", () => {
-    const { answers } = mapJevAnswers(mapOne("needsHuman"), {
+    const answers = mapJevAnswers(mapOne("needsHuman"), {
       needsHuman: { type: "noul", noul: 0.95 },
     });
 
@@ -90,7 +108,7 @@ describe("mapJevAnswers()", () => {
   });
 
   it("maps a choice answer to a categorical answer with confidence", () => {
-    const { answers } = mapJevAnswers(mapOne("intent"), {
+    const answers = mapJevAnswers(mapOne("intent"), {
       intent: {
         type: "choice",
         choice: "billing",
@@ -107,7 +125,7 @@ describe("mapJevAnswers()", () => {
   });
 
   it("remaps score level indexes back onto the declared keys", () => {
-    const { answers } = mapJevAnswers(mapOne("urgency"), {
+    const answers = mapJevAnswers(mapOne("urgency"), {
       urgency: {
         type: "score",
         score: 1.05,
@@ -129,7 +147,7 @@ describe("mapJevAnswers()", () => {
   });
 
   it("omits confidence when Jev does not send it", () => {
-    const { answers } = mapJevAnswers(mapOne("intent"), {
+    const answers = mapJevAnswers(mapOne("intent"), {
       intent: {
         type: "choice",
         choice: "billing",
@@ -141,37 +159,34 @@ describe("mapJevAnswers()", () => {
     expect("confidence" in (answers.intent ?? {})).toBe(false);
   });
 
+  it("passes numbers through without judging them", () => {
+    // Range and sum validation belong to the response boundary, not the mapper.
+    const answers = mapJevAnswers(mapOne("intent"), {
+      intent: {
+        type: "choice",
+        choice: "billing",
+        probabilities: { billing: 7, technical: -1, sales: 0 },
+        confidence: 0.5,
+      },
+    });
+
+    expect(answers.intent).toMatchObject({
+      probabilities: { billing: 7, technical: -1, sales: 0 },
+    });
+  });
+
   it("rejects a missing answer", () => {
-    expect(() => mapJevAnswers(mapAll(), {})).toThrow(
+    expect(() => mapJevAnswers(mapOne("intent"), {})).toThrow(
       InvalidProviderResponseError,
     );
   });
 
-  it("rejects a mismatched answer type", () => {
+  it("rejects a mismatched answer kind", () => {
     expect(() =>
       mapJevAnswers(mapOne("intent"), {
-        intent: {
-          type: "noul",
-          noul: 0.5,
-        } as unknown as never,
+        intent: { type: "noul", noul: 0.5 } as never,
       }),
     ).toThrow(/is a categorical question but Jev answered it as noul/);
-  });
-
-  it("rejects a non-numeric noul", () => {
-    expect(() =>
-      mapJevAnswers(mapOne("needsHuman"), {
-        needsHuman: { type: "noul", noul: "high" } as unknown as never,
-      }),
-    ).toThrow(/numeric noul/);
-  });
-
-  it("rejects a choice answer without a distribution", () => {
-    expect(() =>
-      mapJevAnswers(mapOne("intent"), {
-        intent: { type: "choice", choice: "billing" } as unknown as never,
-      }),
-    ).toThrow(/probability distribution/);
   });
 
   it("rejects a score answer that is missing a level", () => {
@@ -198,11 +213,5 @@ describe("mapJevAnswers()", () => {
         },
       }),
     ).toThrow(/unknown score level "3"/);
-  });
-
-  it("rejects a non-object answers map", () => {
-    expect(() =>
-      mapJevAnswers(mapAll(), null as unknown as Record<string, never>),
-    ).toThrow(/answers map/);
   });
 });

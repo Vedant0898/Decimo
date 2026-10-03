@@ -1,27 +1,31 @@
 import { InvalidProviderResponseError } from "../../core/errors";
-import { isJsonObject } from "../../types/json";
 import type {
-  NormalizedQuestion,
-  ProviderAnswer,
-  ProviderResponse,
-} from "../provider";
-import type {
-  JevAnswer,
-  JevChoiceAnswer,
-  JevNoulAnswer,
-  JevQuestion,
-  JevScoreAnswer,
-} from "./types";
+  CanonicalAnswer,
+  CanonicalQuestion,
+  CategoricalAnswer,
+  OrdinalAnswer,
+} from "../../schema/canonical";
+import type { JevAnswer, JevQuestion } from "./types";
 
 const PROVIDER = "jev";
 
 export interface JevMappedRequest {
   readonly questions: Record<string, JevQuestion>;
+  /**
+   * Ordinal question id to its level keys, positionally aligned with the score
+   * criteria array that Jev answers with index keys.
+   */
   readonly levels: Readonly<Record<string, readonly string[]>>;
 }
 
+/**
+ * Translate canonical questions into Jev's wire format.
+ *
+ * This is the only place Decimo's semantics meet Jev's vocabulary, and the only
+ * place `noul`, `choice` and `score` appear.
+ */
 export function mapQuestionsToJev(
-  questions: Readonly<Record<string, NormalizedQuestion>>,
+  questions: Readonly<Record<string, CanonicalQuestion>>,
 ): JevMappedRequest {
   const mapped: Record<string, JevQuestion> = {};
   const levels: Record<string, readonly string[]> = {};
@@ -35,15 +39,19 @@ export function mapQuestionsToJev(
         mapped[id] = {
           type: "choice",
           instructions: question.description,
-          criteria: { ...question.values },
+          criteria: Object.fromEntries(
+            question.levels.map((level) => [level.key, level.description]),
+          ),
         };
         break;
       case "ordinal": {
-        const keys = Object.keys(question.values);
+        // The canonical level order is the scale, so it is the criteria order.
+        const keys = question.levels.map((level) => level.key);
+
         mapped[id] = {
           type: "score",
           instructions: question.description,
-          criteria: keys.map((key) => question.values[key] ?? ""),
+          criteria: question.levels.map((level) => level.description),
         };
         levels[id] = keys;
         break;
@@ -54,21 +62,22 @@ export function mapQuestionsToJev(
   return { questions: mapped, levels };
 }
 
+/**
+ * Translate Jev's answers back into canonical answers.
+ *
+ * Jev keys a score's probabilities by level index, so they are remapped onto the
+ * keys this request declared. Numbers are moved as they are: range and
+ * distribution validation belong to Decimo's response boundary, not to a
+ * provider.
+ */
 export function mapJevAnswers(
   mapped: JevMappedRequest,
   answers: Readonly<Record<string, JevAnswer>>,
-): ProviderResponse {
-  if (!isJsonObject(answers as unknown)) {
-    throw new InvalidProviderResponseError(
-      "Jev did not return an answers map.",
-      { details: { provider: PROVIDER, received: answers } },
-    );
-  }
-
-  const result: Record<string, ProviderAnswer> = {};
+): Record<string, CanonicalAnswer> {
+  const result: Record<string, CanonicalAnswer> = {};
 
   for (const [id, question] of Object.entries(mapped.questions)) {
-    const answer = (answers as Record<string, JevAnswer>)[id];
+    const answer = answers[id];
 
     if (answer === undefined) {
       throw new InvalidProviderResponseError(
@@ -77,99 +86,61 @@ export function mapJevAnswers(
       );
     }
 
-    if (!isJsonObject(answer as unknown)) {
+    if (answer.type !== question.type) {
       throw new InvalidProviderResponseError(
-        `Question "${id}" was answered with a non-object answer.`,
+        `Question "${id}" is a ${decimoTypeOf(question.type)} question but Jev answered it as ${String(answer.type)}.`,
         { details: { provider: PROVIDER, questionId: id, received: answer } },
       );
     }
 
-    const expected = question.type;
-    const actual = (answer as { type?: unknown }).type;
-
-    if (actual !== expected) {
-      throw new InvalidProviderResponseError(
-        `Question "${id}" is a ${decimoTypeOf(expected)} question but Jev answered it as ${String(actual)}.`,
-        { details: { provider: PROVIDER, questionId: id, received: answer } },
-      );
+    switch (answer.type) {
+      // A noul carries a probability and nothing else.
+      case "noul":
+        result[id] = { type: "boolean", probability: answer.noul };
+        break;
+      case "choice":
+        result[id] = categoricalAnswer(answer.probabilities, answer.confidence);
+        break;
+      case "score":
+        result[id] = ordinalAnswer(
+          remapLevelIndexes(id, answer, mapped.levels[id] ?? []),
+          answer.confidence,
+        );
+        break;
     }
-
-    result[id] =
-      expected === "noul"
-        ? mapNoul(id, answer as JevNoulAnswer)
-        : expected === "choice"
-          ? mapChoice(id, answer as JevChoiceAnswer)
-          : mapScore(id, answer as JevScoreAnswer, mapped.levels[id] ?? []);
   }
 
-  return { answers: result };
+  return result;
 }
 
-function mapNoul(id: string, answer: JevNoulAnswer): ProviderAnswer {
-  const noul = (answer as { noul?: unknown }).noul;
-
-  if (typeof noul !== "number" || !Number.isFinite(noul)) {
-    throw new InvalidProviderResponseError(
-      `Question "${id}" was answered without a numeric noul value.`,
-      { details: { provider: PROVIDER, questionId: id, received: answer } },
-    );
-  }
-
-  return { type: "boolean", probability: noul };
-}
-
-function mapChoice(id: string, answer: JevChoiceAnswer): ProviderAnswer {
-  const probabilities = (answer as { probabilities?: unknown }).probabilities;
-
-  if (!isJsonObject(probabilities as unknown)) {
-    throw new InvalidProviderResponseError(
-      `Question "${id}" was answered without a probability distribution.`,
-      { details: { provider: PROVIDER, questionId: id, received: answer } },
-    );
-  }
-
-  return {
-    type: "categorical",
-    probabilities: probabilities as Record<string, number>,
-    ...optional("confidence", answer),
-  };
-}
-
-function mapScore(
+/**
+ * Jev reports a score per level *index*; Decimo identifies levels by key.
+ */
+function remapLevelIndexes(
   id: string,
-  answer: JevScoreAnswer,
+  answer: { readonly probabilities: Readonly<Record<string, number>> },
   levels: readonly string[],
-): ProviderAnswer {
-  const probabilities = (answer as { probabilities?: unknown }).probabilities;
-
-  if (!isJsonObject(probabilities as unknown)) {
-    throw new InvalidProviderResponseError(
-      `Question "${id}" was answered without a probability distribution.`,
-      { details: { provider: PROVIDER, questionId: id, received: answer } },
-    );
-  }
-
-  const received = probabilities as Record<string, unknown>;
+): Record<string, number> {
+  const declared = new Set(levels.map((_key, index) => String(index)));
   const remapped: Record<string, number> = {};
-  const declared = new Set(levels.map((_level, index) => String(index)));
 
-  for (const key of Object.keys(received)) {
-    if (!declared.has(key)) {
+  for (const index of Object.keys(answer.probabilities)) {
+    if (!declared.has(index)) {
       throw new InvalidProviderResponseError(
-        `Question "${id}" was answered with the unknown score level "${key}".`,
+        `Question "${id}" was answered with the unknown score level "${index}".`,
         {
           details: {
             provider: PROVIDER,
             questionId: id,
-            received: probabilities,
+            received: answer.probabilities,
           },
         },
       );
     }
   }
 
-  levels.forEach((level, index) => {
-    const probability = received[String(index)];
+  levels.forEach((key, index) => {
+    const probability = answer.probabilities[String(index)];
 
     if (probability === undefined) {
       throw new InvalidProviderResponseError(
@@ -178,31 +149,34 @@ function mapScore(
           details: {
             provider: PROVIDER,
             questionId: id,
-            received: probabilities,
+            received: answer.probabilities,
           },
         },
       );
     }
 
-    remapped[level] = probability as number;
+    remapped[key] = probability;
   });
 
-  return {
-    type: "ordinal",
-    probabilities: remapped,
-    ...optional("confidence", answer),
-  };
+  return remapped;
 }
 
-function optional(
-  field: "confidence",
-  answer: unknown,
-): { confidence?: number } {
-  const value = isJsonObject(answer as unknown)
-    ? (answer as Record<string, unknown>)[field]
-    : undefined;
+function categoricalAnswer(
+  probabilities: Readonly<Record<string, number>>,
+  confidence: number | undefined,
+): CategoricalAnswer {
+  return confidence === undefined
+    ? { type: "categorical", probabilities }
+    : { type: "categorical", probabilities, confidence };
+}
 
-  return value === undefined ? {} : { confidence: value as number };
+function ordinalAnswer(
+  probabilities: Readonly<Record<string, number>>,
+  confidence: number | undefined,
+): OrdinalAnswer {
+  return confidence === undefined
+    ? { type: "ordinal", probabilities }
+    : { type: "ordinal", probabilities, confidence };
 }
 
 function decimoTypeOf(jevType: JevQuestion["type"]): string {

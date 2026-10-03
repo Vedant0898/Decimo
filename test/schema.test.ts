@@ -61,16 +61,78 @@ describe("ordinal()", () => {
   it("builds an ordinal question and preserves the declared order", () => {
     const question = ordinal({
       description: "How urgent?",
-      values: { low: "Normal", high: "Now" },
+      values: [
+        { key: "low", description: "Normal" },
+        { key: "high", description: "Now" },
+      ],
     });
 
     expect(question.type).toBe("ordinal");
-    expect(Object.keys(question.values)).toEqual(["low", "high"]);
+    expect(question.values.map((value) => value.key)).toEqual(["low", "high"]);
+  });
+
+  it("rejects a record, because a record cannot carry a reliable order", () => {
+    expect(() =>
+      ordinal({
+        description: "How urgent?",
+        values: { low: "Normal", high: "Now" } as never,
+      }),
+    ).toThrow(/ordered array/);
+  });
+
+  it("preserves a descending numeric-keyed order exactly as declared", () => {
+    const question = ordinal({
+      description: "How good?",
+      values: [
+        { key: "5", description: "Terrible" },
+        { key: "1", description: "Great" },
+      ],
+    });
+
+    // A record would come back as ["1", "5"] from Object.keys.
+    expect(question.values.map((value) => value.key)).toEqual(["5", "1"]);
   });
 
   it("requires at least two levels", () => {
     expect(() =>
-      ordinal({ description: "How urgent?", values: { low: "Normal" } }),
-    ).toThrow(ConfigurationError);
+      ordinal({
+        description: "How urgent?",
+        values: [{ key: "low", description: "Normal" }],
+      }),
+    ).toThrow(/at least 2 levels/);
+  });
+
+  it("rejects a duplicate level key", () => {
+    expect(() =>
+      ordinal({
+        description: "How urgent?",
+        values: [
+          { key: "low", description: "Normal" },
+          { key: "low", description: "Also normal" },
+        ],
+      }),
+    ).toThrow(/declared more than once/);
+  });
+
+  it("rejects an empty key or description", () => {
+    expect(() =>
+      ordinal({
+        description: "How urgent?",
+        values: [
+          { key: "  ", description: "Normal" },
+          { key: "high", description: "Now" },
+        ],
+      }),
+    ).toThrow(/non-empty string "key"/);
+
+    expect(() =>
+      ordinal({
+        description: "How urgent?",
+        values: [
+          { key: "low", description: "" },
+          { key: "high", description: "Now" },
+        ],
+      }),
+    ).toThrow(/requires a non-empty "description"/);
   });
 });

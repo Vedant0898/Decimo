@@ -24,7 +24,13 @@ const decision = defineDecision({
     values: { billing: "…", sales: "…" },
   }),
   needsHuman: boolean({ description: "…" }),
-  urgency: ordinal({ description: "…", values: { low: "…", high: "…" } }),
+  urgency: ordinal({
+    description: "…",
+    values: [
+      { key: "low", description: "…" },
+      { key: "high", description: "…" },
+    ],
+  }),
 });
 
 // 2. Choose a provider and its config.
@@ -41,6 +47,10 @@ result.intent.mostLikely(); // inferred as "billing" | "sales"
 result.intent.probability("billing"); // number
 result.intent.probability("unknown"); // ✗ compile error
 ```
+
+`categorical` takes a `Record` because its values are unordered; `ordinal` takes an ordered
+array because the order _is_ the scale. See the ordering contract in the
+[README](../README.md#ordering-contract).
 
 Step 1 and step 3 never change when you swap providers. That is the whole
 point: the decision is Decimo's, the inference is the provider's, and the

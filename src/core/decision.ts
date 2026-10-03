@@ -1,15 +1,20 @@
 import { ConfigurationError } from "./errors";
 import type { BooleanResult, CategoricalResult, OrdinalResult } from "./result";
 import type {
+  CanonicalCategoricalQuestion,
+  CanonicalDecision,
+  CanonicalLevel,
+  CanonicalOrdinalQuestion,
+  CanonicalQuestion,
+} from "../schema/canonical";
+import type {
   BooleanQuestion,
   CategoricalQuestion,
-  CategoryValues,
   OrdinalQuestion,
   Question,
   ValueOf,
 } from "../schema/types";
-import { requireDescription, requireValues } from "../schema/types";
-import type { NormalizedQuestion } from "../providers/provider";
+import { requireCategoryValues, requireDescription } from "../schema/types";
 
 /** A map of question names to the questions that make up a decision. */
 export type DecisionSpec = Record<string, Question>;
@@ -20,7 +25,7 @@ export type ResultFor<Q> = Q extends BooleanQuestion
   : Q extends CategoricalQuestion<infer T>
     ? CategoricalResult<ValueOf<T>>
     : Q extends OrdinalQuestion<infer T>
-      ? OrdinalResult<ValueOf<T>>
+      ? OrdinalResult<T>
       : never;
 
 /** The evaluation result for a decision, keyed by question name. */
@@ -29,21 +34,34 @@ export type DecisionResult<D extends DecisionSpec> = {
 };
 
 /**
- * Validate a decision and return it with its types preserved, so that
- * `defineDecision` is the single place a decision definition is checked.
+ * Anchor a decision's types without touching it at runtime.
+ *
+ * Validation happens once, where untrusted input enters the system: in
+ * `DecisionEngine.evaluate()`. Builder arguments are already checked eagerly
+ * by `boolean()`, `categorical()` and `ordinal()`.
  */
 export function defineDecision<D extends DecisionSpec>(decision: D): D {
-  normalizeDecision(decision);
   return decision;
 }
 
 /**
- * Validate a decision and flatten it into the provider-neutral questions a
- * provider receives, keyed by question name.
+ * The single entry point the engine uses: validate, then canonicalize.
+ *
+ * This is the only place a decision is inspected, so a decision cannot be
+ * evaluated without having been checked.
  */
-export function normalizeDecision(
+export function prepareDecision(decision: unknown): CanonicalDecision {
+  validateDecision(decision);
+  return canonicalizeDecision(decision);
+}
+
+/**
+ * Is this a well-formed decision? A no-op once it has returned; it only exists
+ * to narrow `unknown` to `DecisionSpec`.
+ */
+export function validateDecision(
   decision: unknown,
-): Record<string, NormalizedQuestion> {
+): asserts decision is DecisionSpec {
   if (
     typeof decision !== "object" ||
     decision === null ||
@@ -54,7 +72,7 @@ export function normalizeDecision(
     );
   }
 
-  const entries = Object.entries(decision as Record<string, unknown>);
+  const entries = Object.entries(decision);
 
   if (entries.length === 0) {
     throw new ConfigurationError(
@@ -62,57 +80,104 @@ export function normalizeDecision(
     );
   }
 
-  const questions: Record<string, NormalizedQuestion> = {};
-
   for (const [id, question] of entries) {
     if (id.trim() === "") {
       throw new ConfigurationError("Question names cannot be empty.");
     }
 
-    questions[id] = normalizeQuestion(id, question);
+    assertQuestionShape(id, question);
   }
-
-  return questions;
 }
 
-function normalizeQuestion(id: string, question: unknown): NormalizedQuestion {
+/**
+ * Convert a validated decision into the canonical representation providers
+ * receive: ids attached, and an explicit ordered list of levels per question.
+ */
+export function canonicalizeDecision(
+  decision: DecisionSpec,
+): CanonicalDecision {
+  const canonical: Record<string, CanonicalQuestion> = {};
+
+  for (const [id, question] of Object.entries(decision)) {
+    canonical[id] = canonicalizeQuestion(id, question);
+  }
+
+  return canonical;
+}
+
+function assertQuestionShape(id: string, question: unknown): void {
   if (typeof question !== "object" || question === null) {
     throw new ConfigurationError(
       `Question "${id}" must be an object created by boolean(), categorical() or ordinal().`,
     );
   }
 
-  const candidate = question as {
-    type?: unknown;
-    description?: unknown;
-    values?: unknown;
-  };
+  const type: unknown = Reflect.get(question, "type");
 
-  if (candidate.type === "boolean") {
-    return {
-      id,
-      type: "boolean",
-      description: requireDescription(candidate.description, "boolean"),
-    };
-  }
-
-  if (candidate.type === "categorical" || candidate.type === "ordinal") {
-    const type = candidate.type;
-    const values: CategoryValues = requireValues(
-      candidate.values,
-      type,
-      type === "ordinal" ? 2 : 1,
+  if (type !== "boolean" && type !== "categorical" && type !== "ordinal") {
+    throw new ConfigurationError(
+      `Question "${id}" has an unsupported type: ${JSON.stringify(type)}.`,
     );
+  }
+}
 
-    return {
-      id,
-      type,
-      description: requireDescription(candidate.description, type),
-      values,
-    };
+function canonicalizeQuestion(
+  id: string,
+  question: Question,
+): CanonicalQuestion {
+  switch (question.type) {
+    case "boolean":
+      return {
+        id,
+        type: "boolean",
+        description: requireDescription(question.description, "boolean"),
+      };
+    case "categorical":
+      return canonicalizeCategorical(id, question);
+    case "ordinal":
+      return canonicalizeOrdinal(id, question);
+  }
+}
+
+function canonicalizeCategorical(
+  id: string,
+  question: CategoricalQuestion,
+): CanonicalCategoricalQuestion {
+  return {
+    id,
+    type: "categorical",
+    description: requireDescription(question.description, "categorical"),
+    levels: levelsFromRecord(
+      requireCategoryValues(question.values, "categorical", 1),
+    ),
+  };
+}
+
+function canonicalizeOrdinal(
+  id: string,
+  question: OrdinalQuestion,
+): CanonicalOrdinalQuestion {
+  // The array order is the scale. It is preserved exactly as declared, so it can
+  // never be reshuffled by JavaScript's key ordering rules.
+  const levels: CanonicalLevel[] = question.values.map((value) => ({
+    key: value.key,
+    description: value.description,
+  }));
+
+  return {
+    id,
+    type: "ordinal",
+    description: requireDescription(question.description, "ordinal"),
+    levels,
+  };
+}
+
+function levelsFromRecord(values: Record<string, string>): CanonicalLevel[] {
+  const levels: CanonicalLevel[] = [];
+
+  for (const [key, description] of Object.entries(values)) {
+    levels.push({ key, description });
   }
 
-  throw new ConfigurationError(
-    `Question "${id}" has an unsupported type: ${JSON.stringify(candidate.type)}.`,
-  );
+  return levels;
 }

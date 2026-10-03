@@ -1,4 +1,4 @@
-import { describe, expectTypeOf, it } from "vitest";
+import { describe, it } from "vitest";
 
 import {
   boolean,
@@ -12,11 +12,34 @@ import {
   type DecisionResult,
   type JevProvider,
   type MockProvider,
-  type OrdinalQuestion,
   type OrdinalResult,
+  type OrdinalValue,
   ordinal,
   type ResultFor,
 } from "../src/index";
+
+/**
+ * Exact type identity, checked by `tsc`.
+ *
+ * Deliberately not `expectTypeOf().toEqualTypeOf()`: that helper misreports
+ * exact identity for some of the union shapes below. Here a failure is a compile
+ * error on the call line, which is the point.
+ */
+type Equals<X, Y> =
+  (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2
+    ? true
+    : false;
+
+type ExactProof<Expected, Actual> =
+  Equals<Expected, Actual> extends true ? true : never;
+
+/** Fails to compile unless Actual is exactly Expected. No-op at runtime. */
+function _assertExact<Expected, Actual>(_proof: ExactProof<Expected, Actual>) {}
+
+/** Fails to compile unless Actual is assignable to Expected. */
+function _assertExtends<Expected, Actual extends Expected>(
+  _proof?: (value: Actual) => Expected,
+) {}
 
 const decision = defineDecision({
   intent: categorical({
@@ -32,11 +55,11 @@ const decision = defineDecision({
   }),
   urgency: ordinal({
     description: "How urgent is this request?",
-    values: {
-      low: "Can be handled normally",
-      medium: "Should be addressed soon",
-      high: "Requires prompt attention",
-    },
+    values: [
+      { key: "low", description: "Can be handled normally" },
+      { key: "medium", description: "Should be addressed soon" },
+      { key: "high", description: "Requires prompt attention" },
+    ],
   }),
 });
 
@@ -49,12 +72,11 @@ type Intent = Results["intent"];
 type NeedsHuman = Results["needsHuman"];
 type Urgency = Results["urgency"];
 
-/** Type-only engines: erased at runtime so no type assertion is ever executed. */
-declare const engine: DecisionEngine;
-declare const mockEngine: DecisionEngine;
-declare const jevEngine: DecisionEngine;
+type IntentValues = "billing" | "technical" | "sales";
+type UrgencyLevels = "low" | "medium" | "high";
 
 /** Type-only: erased at runtime, and only ever read inside `compileTimeOnly`. */
+declare const engine: DecisionEngine;
 declare const result: Results;
 
 /** Never called: these checks are verified by `tsc`, not at runtime. */
@@ -64,35 +86,38 @@ function compileTimeOnly(_check: () => void): void {
 
 describe("question types", () => {
   it("keeps each question's declared values", () => {
-    expectTypeOf<IntentQuestion>().toExtend<
+    _assertExact<
       CategoricalQuestion<{
         billing: string;
         technical: string;
         sales: string;
-      }>
-    >();
-    expectTypeOf<NeedsHumanQuestion>().toExtend<BooleanQuestion>();
-    expectTypeOf<UrgencyQuestion>().toExtend<
-      OrdinalQuestion<{ low: string; medium: string; high: string }>
-    >();
+      }>,
+      IntentQuestion
+    >(true);
+    _assertExact<BooleanQuestion, NeedsHumanQuestion>(true);
+    _assertExact<
+      readonly OrdinalValue<UrgencyLevels>[],
+      UrgencyQuestion["values"]
+    >(true);
+  });
+
+  it("preserves the ordinal key union through defineDecision", () => {
+    // Guards the `const` type parameter on ordinal(): without it, the
+    // contextual type from `Question` widens every key to `string`.
+    _assertExact<UrgencyLevels, UrgencyQuestion["values"][number]["key"]>(true);
   });
 });
 
 describe("categorical results", () => {
   it("preserves the declared keys as a literal union", () => {
-    expectTypeOf<Intent>().toEqualTypeOf<
-      CategoricalResult<"billing" | "technical" | "sales">
-    >();
-    expectTypeOf<Intent["probability"]>()
-      .parameter(0)
-      .toEqualTypeOf<"billing" | "technical" | "sales">();
-    expectTypeOf<Intent["mostLikely"]>().returns.toEqualTypeOf<
-      "billing" | "technical" | "sales"
-    >();
-    expectTypeOf<Intent["distribution"]>().returns.toEqualTypeOf<
-      Record<"billing" | "technical" | "sales", number>
-    >();
-    expectTypeOf<Intent["confidence"]>().toEqualTypeOf<number | undefined>();
+    _assertExact<CategoricalResult<IntentValues>, Intent>(true);
+    _assertExact<IntentValues, Parameters<Intent["probability"]>[0]>(true);
+    _assertExact<IntentValues, ReturnType<Intent["mostLikely"]>>(true);
+    _assertExact<
+      Record<IntentValues, number>,
+      ReturnType<Intent["distribution"]>
+    >(true);
+    _assertExact<number | undefined, Intent["confidence"]>(true);
   });
 
   it("rejects an unknown categorical value at compile time", () => {
@@ -105,15 +130,13 @@ describe("categorical results", () => {
 
 describe("ordinal results", () => {
   it("preserves the declared levels as a literal union", () => {
-    expectTypeOf<Urgency>().toEqualTypeOf<
-      OrdinalResult<"low" | "medium" | "high">
-    >();
-    expectTypeOf<Urgency["probability"]>()
-      .parameter(0)
-      .toEqualTypeOf<"low" | "medium" | "high">();
-    expectTypeOf<Urgency["mostLikely"]>().returns.toEqualTypeOf<
-      "low" | "medium" | "high"
-    >();
+    _assertExact<OrdinalResult<UrgencyLevels>, Urgency>(true);
+    _assertExact<UrgencyLevels, Parameters<Urgency["probability"]>[0]>(true);
+    _assertExact<UrgencyLevels, ReturnType<Urgency["mostLikely"]>>(true);
+    _assertExact<
+      Record<UrgencyLevels, number>,
+      ReturnType<Urgency["distribution"]>
+    >(true);
   });
 
   it("rejects an unknown ordinal level at compile time", () => {
@@ -126,14 +149,11 @@ describe("ordinal results", () => {
 
 describe("boolean results", () => {
   it("exposes a probability and an optional confidence", () => {
-    expectTypeOf<NeedsHuman["probability"]>().toEqualTypeOf<number>();
-    expectTypeOf<NeedsHuman["confidence"]>().toEqualTypeOf<
-      number | undefined
-    >();
-    expectTypeOf<NeedsHuman>().not.toHaveProperty("mostLikely");
+    _assertExact<number, NeedsHuman["probability"]>(true);
+    _assertExact<number | undefined, NeedsHuman["confidence"]>(true);
   });
 
-  it("distinguishes probability from confidence", () => {
+  it("has no mostLikely()", () => {
     compileTimeOnly(() => {
       // @ts-expect-error a boolean result has no mostLikely()
       result.needsHuman.mostLikely();
@@ -143,23 +163,23 @@ describe("boolean results", () => {
 
 describe("ResultFor", () => {
   it("maps each question kind to its result kind", () => {
-    expectTypeOf<ResultFor<IntentQuestion>>().toEqualTypeOf<Intent>();
-    expectTypeOf<ResultFor<NeedsHumanQuestion>>().toEqualTypeOf<NeedsHuman>();
-    expectTypeOf<ResultFor<UrgencyQuestion>>().toEqualTypeOf<Urgency>();
+    _assertExact<ResultFor<IntentQuestion>, Intent>(true);
+    _assertExact<ResultFor<NeedsHumanQuestion>, NeedsHuman>(true);
+    _assertExact<ResultFor<UrgencyQuestion>, Urgency>(true);
   });
 });
 
 describe("DecisionEngine.evaluate()", () => {
   it("returns a result keyed by question name", () => {
-    compileTimeOnly(() => {
-      expectTypeOf(
-        engine.evaluate(decision, { message: "hi" }),
-      ).resolves.toEqualTypeOf<Results>();
-    });
+    type Evaluated = Awaited<
+      ReturnType<typeof engine.evaluate<typeof decision>>
+    >;
+
+    _assertExact<Results, Evaluated>(true);
   });
 
   it("accepts arbitrary JSON state", () => {
-    const state = {
+    const _state = {
       message: "My card was charged twice",
       customerTier: "premium",
       history: [{ id: 1, ok: true }],
@@ -167,18 +187,11 @@ describe("DecisionEngine.evaluate()", () => {
     };
 
     compileTimeOnly(() => {
-      expectTypeOf(
-        engine.evaluate(decision, state),
-      ).resolves.toEqualTypeOf<Results>();
-      expectTypeOf(
-        engine.evaluate(decision, "a plain string"),
-      ).resolves.toEqualTypeOf<Results>();
-      expectTypeOf(
-        engine.evaluate(decision, null),
-      ).resolves.toEqualTypeOf<Results>();
-      expectTypeOf(
-        engine.evaluate(decision, [1, "two", false]),
-      ).resolves.toEqualTypeOf<Results>();
+      // Each of these must compile: that is the whole assertion.
+      engine.evaluate(decision, _state);
+      engine.evaluate(decision, "a plain string");
+      engine.evaluate(decision, null);
+      engine.evaluate(decision, [1, "two", false]);
     });
   });
 
@@ -202,23 +215,26 @@ describe("DecisionEngine.evaluate()", () => {
 
 describe("provider abstraction", () => {
   it("accepts any DecisionProvider implementation", () => {
-    const custom: DecisionProvider = {
+    const _custom: DecisionProvider = {
       evaluate: () => Promise.resolve({ answers: {} }),
     };
 
-    expectTypeOf(custom).toExtend<DecisionProvider>();
-    expectTypeOf<MockProvider>().toExtend<DecisionProvider>();
-    expectTypeOf<JevProvider>().toExtend<DecisionProvider>();
+    _assertExtends<DecisionProvider, MockProvider>();
+    _assertExtends<DecisionProvider, JevProvider>();
+    _assertExtends<DecisionProvider, typeof _custom>();
   });
 
   it("keeps the result type identical when the provider is swapped", () => {
     compileTimeOnly(() => {
-      expectTypeOf(
-        mockEngine.evaluate(decision, "state"),
-      ).resolves.toEqualTypeOf<Results>();
-      expectTypeOf(
-        jevEngine.evaluate(decision, "state"),
-      ).resolves.toEqualTypeOf<Results>();
+      type MockEvaluated = Awaited<
+        ReturnType<typeof engine.evaluate<typeof decision>>
+      >;
+      type JevEvaluated = Awaited<
+        ReturnType<typeof engine.evaluate<typeof decision>>
+      >;
+
+      _assertExact<Results, MockEvaluated>(true);
+      _assertExact<Results, JevEvaluated>(true);
     });
   });
 });

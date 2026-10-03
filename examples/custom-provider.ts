@@ -14,6 +14,7 @@ import {
   DecisionEngine,
   defineDecision,
   ordinal,
+  type CanonicalAnswer,
   type DecisionProvider,
   type ProviderRequest,
   type ProviderResponse,
@@ -35,11 +36,12 @@ const triageDecision = defineDecision({
   }),
   urgency: ordinal({
     description: "How urgent is this request?",
-    values: {
-      low: "Can be handled normally",
-      medium: "Should be addressed soon",
-      high: "Requires prompt attention",
-    },
+    // The array order is the scale.
+    values: [
+      { key: "low", description: "Can be handled normally" },
+      { key: "medium", description: "Should be addressed soon" },
+      { key: "high", description: "Requires prompt attention" },
+    ],
   }),
 });
 
@@ -53,7 +55,7 @@ class KeywordProvider implements DecisionProvider {
   readonly name = "keyword";
 
   async evaluate(request: ProviderRequest): Promise<ProviderResponse> {
-    const answers: ProviderResponse["answers"] = {};
+    const answers: Record<string, CanonicalAnswer> = {};
 
     for (const [id, question] of Object.entries(request.questions)) {
       const text = extractText(request.state).toLowerCase();
@@ -66,7 +68,7 @@ class KeywordProvider implements DecisionProvider {
           };
           break;
         case "categorical": {
-          const values = Object.keys(question.values);
+          const values = question.levels.map((level) => level.key);
           const scores = values.map((value) => ({
             value,
             score: (KEYWORDS[value] ?? []).filter((keyword) =>
@@ -90,7 +92,7 @@ class KeywordProvider implements DecisionProvider {
           break;
         }
         case "ordinal": {
-          const values = Object.keys(question.values);
+          const values = question.levels.map((level) => level.key);
           const probabilities: Record<string, number> = {};
 
           for (const value of values) {

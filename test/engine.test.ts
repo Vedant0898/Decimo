@@ -30,11 +30,11 @@ const supportDecision = defineDecision({
   }),
   urgency: ordinal({
     description: "How urgent is this request?",
-    values: {
-      low: "Can be handled normally",
-      medium: "Should be addressed soon",
-      high: "Requires prompt attention",
-    },
+    values: [
+      { key: "low", description: "Can be handled normally" },
+      { key: "medium", description: "Should be addressed soon" },
+      { key: "high", description: "Requires prompt attention" },
+    ],
   }),
 });
 
@@ -54,16 +54,13 @@ describe("defineDecision()", () => {
     expect(defineDecision(supportDecision)).toBe(supportDecision);
   });
 
-  it("rejects an empty decision", () => {
-    expect(() => defineDecision({})).toThrow(ConfigurationError);
-  });
+  it("performs no runtime work, by design", () => {
+    const broken = {
+      broken: { type: "nonsense" },
+    } as unknown as typeof supportDecision;
 
-  it("rejects an unsupported question type", () => {
-    expect(() =>
-      defineDecision({
-        broken: { type: "ordinal" } as unknown as ReturnType<typeof boolean>,
-      }),
-    ).toThrow(ConfigurationError);
+    // Validation happens once, at evaluation time, not twice.
+    expect(defineDecision(broken)).toBe(broken);
   });
 });
 
@@ -119,11 +116,11 @@ describe("DecisionEngine", () => {
     });
     const urgency = received?.questions["urgency"];
 
-    expect(urgency?.type === "ordinal" ? urgency.values : undefined).toEqual({
-      low: "Can be handled normally",
-      medium: "Should be addressed soon",
-      high: "Requires prompt attention",
-    });
+    expect(urgency?.type === "ordinal" ? urgency.levels : undefined).toEqual([
+      { key: "low", description: "Can be handled normally" },
+      { key: "medium", description: "Should be addressed soon" },
+      { key: "high", description: "Requires prompt attention" },
+    ]);
   });
 
   it("returns typed provider answers", async () => {

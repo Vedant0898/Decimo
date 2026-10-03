@@ -1,7 +1,17 @@
-import {
-  InvalidProviderResponseError,
-  type InvalidProviderResponseDetails,
-} from "./errors";
+/**
+ * Result construction.
+ *
+ * Inputs here are already validated by the provider-response boundary, so this
+ * module only builds. It contains no `unknown` inputs and performs no provider
+ * checks — there is exactly one validation path in Decimo.
+ */
+
+import type {
+  BooleanAnswer,
+  CanonicalLevel,
+  CategoricalAnswer,
+  OrdinalAnswer,
+} from "../schema/canonical";
 
 export interface BooleanResult {
   readonly probability: number;
@@ -18,169 +28,70 @@ export interface DistributionResult<T extends string> {
 export type CategoricalResult<T extends string> = DistributionResult<T>;
 export type OrdinalResult<T extends string> = DistributionResult<T>;
 
+/** How far a provider's distribution may deviate from summing to 1. */
 export const DISTRIBUTION_SUM_TOLERANCE = 1e-6;
 
-function details(
-  provider: string | undefined,
-  questionId: string,
-  received: unknown,
-): InvalidProviderResponseDetails {
-  return provider === undefined
-    ? { questionId, received }
-    : { provider, questionId, received };
+export type ValidatedResult = BooleanResult | DistributionResult<string>;
+
+export function createBooleanResult(answer: BooleanAnswer): BooleanResult {
+  return answer.confidence === undefined
+    ? { probability: answer.probability }
+    : { probability: answer.probability, confidence: answer.confidence };
 }
 
-export function createBooleanResult(input: {
-  readonly questionId: string;
-  readonly probability: unknown;
-  readonly confidence?: unknown;
-  readonly provider?: string;
-}): BooleanResult {
-  const probability = assertProbability(
-    input.probability,
-    input.questionId,
-    "probability",
-    input.provider,
-  );
-  const confidence = assertOptionalProbability(
-    input.confidence,
-    input.questionId,
-    "confidence",
-    input.provider,
-  );
+export function createDistributionResult(
+  levels: readonly CanonicalLevel[],
+  answer: CategoricalAnswer | OrdinalAnswer,
+): DistributionResult<string> {
+  const first = levels[0];
 
-  return confidence === undefined
-    ? { probability }
-    : { probability, confidence };
-}
-
-export function createDistributionResult<T extends string>(input: {
-  readonly questionId: string;
-  readonly values: readonly T[];
-  readonly probabilities: unknown;
-  readonly confidence?: unknown;
-  readonly provider?: string;
-}): DistributionResult<T> {
-  const { questionId, values, provider } = input;
-
-  if (typeof input.probabilities !== "object" || input.probabilities === null) {
-    throw new InvalidProviderResponseError(
-      `Question "${questionId}" must be answered with a probability distribution.`,
-      { details: details(provider, questionId, input.probabilities) },
-    );
+  if (first === undefined) {
+    throw new Error("A distribution result requires at least one level.");
   }
 
-  const received = input.probabilities as Record<string, unknown>;
-  const declared = new Set(values);
-  const accumulated = {} as Record<T, number>;
-  let total = 0;
+  const accumulated: Record<string, number> = {};
 
-  for (const value of values) {
-    const probability = received[value];
+  for (const level of levels) {
+    const probability = answer.probabilities[level.key];
 
+    // The boundary guarantees this; absent a bug it is unreachable.
     if (probability === undefined) {
-      throw new InvalidProviderResponseError(
-        `Question "${questionId}" is missing a probability for value "${value}".`,
-        { details: details(provider, questionId, input.probabilities) },
-      );
+      throw new Error(`Value "${level.key}" was not answered.`);
     }
 
-    const checked = assertProbability(
-      probability,
-      questionId,
-      `probability for "${value}"`,
-      provider,
-    );
-
-    total += checked;
-    accumulated[value] = checked;
+    accumulated[level.key] = probability;
   }
 
-  for (const key of Object.keys(received)) {
-    if (!declared.has(key as T)) {
-      throw new InvalidProviderResponseError(
-        `Question "${questionId}" was answered with the unknown value "${key}".`,
-        { details: details(provider, questionId, input.probabilities) },
-      );
-    }
-  }
-
-  if (Math.abs(total - 1) > DISTRIBUTION_SUM_TOLERANCE) {
-    throw new InvalidProviderResponseError(
-      `Question "${questionId}" probabilities must sum to 1, received ${total}.`,
-      { details: details(provider, questionId, input.probabilities) },
-    );
-  }
-
-  const confidence = assertOptionalProbability(
-    input.confidence,
-    questionId,
-    "confidence",
-    provider,
-  );
-
-  const probabilityOf = (value: T): number => {
+  const probabilityOf = (value: string): number => {
     const probability = accumulated[value];
 
     if (probability === undefined) {
-      throw new InvalidProviderResponseError(
-        `Question "${questionId}" has no declared value "${String(value)}".`,
-        { details: details(provider, questionId, input.probabilities) },
+      throw new TypeError(
+        `"${value}" is not a declared value of this question.`,
       );
     }
 
     return probability;
   };
 
-  const mostLikely = (): T => {
-    let best = values[0] as T;
+  // Ties resolve to the earliest declared level, because `levels` is ordered.
+  let best = first.key;
 
-    for (const value of values) {
-      if (probabilityOf(value) > probabilityOf(best)) {
-        best = value;
-      }
+  for (const level of levels) {
+    if (probabilityOf(level.key) > probabilityOf(best)) {
+      best = level.key;
     }
+  }
 
-    return best;
-  };
+  const mostLikely = (): string => best;
+  const distribution = (): Record<string, number> => ({ ...accumulated });
 
-  const distribution = (): Record<T, number> => ({ ...accumulated });
-
-  return confidence === undefined
+  return answer.confidence === undefined
     ? { probability: probabilityOf, mostLikely, distribution }
-    : { probability: probabilityOf, mostLikely, distribution, confidence };
-}
-
-function assertProbability(
-  value: unknown,
-  questionId: string,
-  label: string,
-  provider?: string,
-): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new InvalidProviderResponseError(
-      `Question "${questionId}" has a non-numeric ${label}.`,
-      { details: details(provider, questionId, value) },
-    );
-  }
-
-  if (value < 0 || value > 1) {
-    throw new InvalidProviderResponseError(
-      `Question "${questionId}" has a ${label} outside [0, 1]: ${value}.`,
-      { details: details(provider, questionId, value) },
-    );
-  }
-
-  return value;
-}
-
-function assertOptionalProbability(
-  value: unknown,
-  questionId: string,
-  label: string,
-  provider?: string,
-): number | undefined {
-  return value === undefined
-    ? undefined
-    : assertProbability(value, questionId, label, provider);
+    : {
+        probability: probabilityOf,
+        mostLikely,
+        distribution,
+        confidence: answer.confidence,
+      };
 }

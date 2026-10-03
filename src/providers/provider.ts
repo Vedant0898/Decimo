@@ -1,58 +1,21 @@
-import type { CategoryValues } from "../schema/types";
+import type { CanonicalAnswer, CanonicalDecision } from "../schema/canonical";
 import type { JsonValue } from "../types/json";
 
-export interface NormalizedBooleanQuestion {
-  readonly id: string;
-  readonly type: "boolean";
-  readonly description: string;
-}
-
-export interface NormalizedCategoricalQuestion {
-  readonly id: string;
-  readonly type: "categorical";
-  readonly description: string;
-  readonly values: CategoryValues;
-}
-
-export interface NormalizedOrdinalQuestion {
-  readonly id: string;
-  readonly type: "ordinal";
-  readonly description: string;
-  readonly values: CategoryValues;
-}
-
-export type NormalizedQuestion =
-  | NormalizedBooleanQuestion
-  | NormalizedCategoricalQuestion
-  | NormalizedOrdinalQuestion;
-
+/**
+ * The provider contract, expressed entirely in Decimo's canonical vocabulary.
+ *
+ * A provider receives canonical questions — an id and an explicit ordered list
+ * of levels — plus the state, and returns canonical answers. It maps between
+ * that and its own wire format; nothing provider-specific crosses this boundary.
+ */
 export interface ProviderRequest {
   readonly state: JsonValue;
-  readonly questions: Readonly<Record<string, NormalizedQuestion>>;
+  readonly questions: CanonicalDecision;
 }
-
-export interface BooleanAnswer {
-  readonly type: "boolean";
-  readonly probability: number;
-  readonly confidence?: number;
-}
-
-export interface CategoricalAnswer {
-  readonly type: "categorical";
-  readonly probabilities: Readonly<Record<string, number>>;
-  readonly confidence?: number;
-}
-
-export interface OrdinalAnswer {
-  readonly type: "ordinal";
-  readonly probabilities: Readonly<Record<string, number>>;
-  readonly confidence?: number;
-}
-
-export type ProviderAnswer = BooleanAnswer | CategoricalAnswer | OrdinalAnswer;
 
 export interface ProviderResponse {
-  readonly answers: Readonly<Record<string, ProviderAnswer>>;
+  readonly answers: Readonly<Record<string, CanonicalAnswer>>;
+  /** The provider's untouched payload, for debugging. Never interpreted. */
   readonly raw?: unknown;
 }
 

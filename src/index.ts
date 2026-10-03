@@ -8,14 +8,28 @@ export type {
   CategoricalQuestion,
   CategoryValues,
   OrdinalQuestion,
+  OrdinalValue,
   Question,
   QuestionType,
   ValueOf,
 } from "./schema/types";
 
+export type {
+  BooleanAnswer,
+  CanonicalAnswer,
+  CanonicalBooleanQuestion,
+  CanonicalCategoricalQuestion,
+  CanonicalDecision,
+  CanonicalLevel,
+  CanonicalOrdinalQuestion,
+  CanonicalQuestion,
+  CanonicalQuestionType,
+  CategoricalAnswer,
+  OrdinalAnswer,
+} from "./schema/canonical";
+
 export {
   defineDecision,
-  normalizeDecision,
   type DecisionResult,
   type DecisionSpec,
   type ResultFor,
@@ -28,8 +42,6 @@ export {
 } from "./core/engine";
 
 export {
-  createBooleanResult,
-  createDistributionResult,
   DISTRIBUTION_SUM_TOLERANCE,
   type BooleanResult,
   type CategoricalResult,
@@ -47,15 +59,7 @@ export {
 } from "./core/errors";
 
 export type {
-  BooleanAnswer,
-  CategoricalAnswer,
   DecisionProvider,
-  NormalizedBooleanQuestion,
-  NormalizedCategoricalQuestion,
-  NormalizedOrdinalQuestion,
-  NormalizedQuestion,
-  OrdinalAnswer,
-  ProviderAnswer,
   ProviderContext,
   ProviderRequest,
   ProviderResponse,
@@ -68,8 +72,8 @@ export {
 } from "./providers/mock";
 
 /**
- * Providers are configured here and nowhere else. Provider-internal request and
- * response shapes stay inside each provider's module.
+ * Providers are configured here and nowhere else. A provider's request and
+ * response formats stay inside its own module.
  */
 export { JevProvider, type JevProviderOptions } from "./providers/jev";
 

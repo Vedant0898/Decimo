@@ -7,6 +7,19 @@ import * as api from "../src/index";
  * and its config; everything behind that boundary belongs to the provider.
  */
 const FORBIDDEN_EXPORTS = [
+  // Internals: the engine, the boundary and the canonicalization steps are not
+  // part of the contract. They are reachable only by deep import.
+  "prepareDecision",
+  "validateDecision",
+  "canonicalizeDecision",
+  "validateProviderResponse",
+  "createBooleanResult",
+  "createDistributionResult",
+  "NormalizedQuestion",
+  "NormalizedBooleanQuestion",
+  "NormalizedCategoricalQuestion",
+  "NormalizedOrdinalQuestion",
+  "ProviderAnswer",
   "JevClient",
   "JevProviderOptions.client",
   "JEV_DEFAULT_BASE_URL",

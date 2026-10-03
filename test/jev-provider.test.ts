@@ -28,11 +28,11 @@ const decision = defineDecision({
   }),
   urgency: ordinal({
     description: "How urgent is this request?",
-    values: {
-      low: "Can be handled normally",
-      medium: "Should be addressed soon",
-      high: "Requires prompt attention",
-    },
+    values: [
+      { key: "low", description: "Can be handled normally" },
+      { key: "medium", description: "Should be addressed soon" },
+      { key: "high", description: "Requires prompt attention" },
+    ],
   }),
 });
 

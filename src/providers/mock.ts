@@ -1,7 +1,6 @@
-import type { CategoryValues } from "../schema/types";
+import type { CanonicalAnswer, CanonicalLevel } from "../schema/canonical";
 import type {
   DecisionProvider,
-  ProviderAnswer,
   ProviderContext,
   ProviderRequest,
   ProviderResponse,
@@ -39,8 +38,8 @@ export class MockProvider implements DecisionProvider {
 
 function uniformAnswers(
   request: ProviderRequest,
-): Record<string, ProviderAnswer> {
-  const answers: Record<string, ProviderAnswer> = {};
+): Record<string, CanonicalAnswer> {
+  const answers: Record<string, CanonicalAnswer> = {};
 
   for (const [id, question] of Object.entries(request.questions)) {
     switch (question.type) {
@@ -50,13 +49,13 @@ function uniformAnswers(
       case "categorical":
         answers[id] = {
           type: "categorical",
-          probabilities: uniform(question.values),
+          probabilities: uniform(question.levels),
         };
         break;
       case "ordinal":
         answers[id] = {
           type: "ordinal",
-          probabilities: uniform(question.values),
+          probabilities: uniform(question.levels),
         };
         break;
     }
@@ -65,12 +64,12 @@ function uniformAnswers(
   return answers;
 }
 
-function uniform(values: CategoryValues): Record<string, number> {
-  const probability = 1 / Object.keys(values).length;
+function uniform(levels: readonly CanonicalLevel[]): Record<string, number> {
+  const probability = 1 / levels.length;
   const probabilities: Record<string, number> = {};
 
-  for (const value of Object.keys(values)) {
-    probabilities[value] = probability;
+  for (const level of levels) {
+    probabilities[level.key] = probability;
   }
 
   return probabilities;
