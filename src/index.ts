@@ -1,5 +1,3 @@
-export const VERSION = "0.1.0";
-
 export { boolean, type BooleanConfig } from "./schema/boolean";
 export { categorical, type CategoricalConfig } from "./schema/categorical";
 export { ordinal, type OrdinalConfig } from "./schema/ordinal";
